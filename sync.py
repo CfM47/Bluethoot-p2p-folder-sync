@@ -12,10 +12,7 @@ class FolderSync:
 
     def start_sync(self):
         try:
-            # Sincroniza los archivos existentes antes de comenzar
             self.sync_existing_files()
-
-            # Configura un observador para la carpeta
             event_handler = FolderEventHandler(self.server, self.peer_addr)
             observer = Observer()
             observer.schedule(event_handler, self.folder_path, recursive=True)
@@ -23,7 +20,7 @@ class FolderSync:
             print("Sincronización de carpeta iniciada.")
 
             while True:
-                time.sleep(1)  # Mantener el programa activo
+                time.sleep(1)
         except KeyboardInterrupt:
             print("Sincronización detenida manualmente.")
             observer.stop()
@@ -33,7 +30,6 @@ class FolderSync:
             observer.join()
 
     def sync_existing_files(self):
-        """Envía todos los archivos existentes en la carpeta al inicio."""
         try:
             for root, _, files in os.walk(self.folder_path):
                 for file in files:
@@ -48,7 +44,6 @@ class FolderEventHandler(FileSystemEventHandler):
     def __init__(self, server, peer_addr):
         self.server = server
         self.peer_addr = peer_addr
-        self.synced_files = set()  # Para evitar duplicados
 
     def on_created(self, event):
         if not event.is_directory:
@@ -64,16 +59,16 @@ class FolderEventHandler(FileSystemEventHandler):
 
     def sync_file(self, file_path):
         try:
-            if file_path not in self.synced_files:
-                self.synced_files.add(file_path)
-                self.server.send_file(file_path, self.peer_addr)
+            self.server.send_file(file_path, self.peer_addr)
         except Exception as e:
             print(f"Error al sincronizar archivo {file_path}: {e}")
 
     def delete_file(self, file_path):
         try:
             file_name = os.path.basename(file_path)
-            self.server.send_file(f"DELETE::{file_name}", self.peer_addr)
+            with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM) as sock:
+                sock.connect((self.peer_addr, self.server.port))
+                sock.sendall(f"DELETE::{file_name}".encode())
             print(f"Archivo eliminado sincronizado: {file_name}")
         except Exception as e:
             print(f"Error al sincronizar la eliminación de {file_path}: {e}")

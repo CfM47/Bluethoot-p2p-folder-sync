@@ -6,7 +6,7 @@ import threading
 def main():
     local_addr = input("Enter the local Bluetooth address: ")
     folder_path = input("Enter the folder path to sync: ")
-    peer_addr = input("Enter the Bluetooth address of the peer: ")  # Agregar peer_addr
+    peer_addr = input("Enter the Bluetooth address of the peer: ")
 
     bt_server = server.BluetoothServer(local_addr, folder_path)
 
