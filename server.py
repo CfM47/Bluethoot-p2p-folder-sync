@@ -1,7 +1,7 @@
 import socket
 import os
 import threading
-import json
+
 
 class BluetoothServer:
     def __init__(self, local_addr, folder_path, port=30):
@@ -11,10 +11,14 @@ class BluetoothServer:
         self.lock = threading.Lock()
 
     def start_server(self):
-        sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-        sock.bind((self.local_addr, self.port))
-        sock.listen(1)
-        print(f"Servidor escuchando en {self.local_addr}:{self.port}")
+        try:
+            sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
+            sock.bind((self.local_addr, self.port))
+            sock.listen(1)
+            print(f"Servidor escuchando en {self.local_addr}:{self.port}")
+        except Exception as e:
+            print(f"Error al iniciar el servidor Bluetooth: {e}")
+            return
 
         while True:
             try:
@@ -22,42 +26,50 @@ class BluetoothServer:
                 print(f"Conexión aceptada de {address}")
                 threading.Thread(target=self.handle_client, args=(client_sock,)).start()
             except Exception as e:
-                print(f"Error en el servidor: {e}")
+                print(f"Error aceptando conexión: {e}")
 
     def handle_client(self, client_sock):
         try:
-            data = client_sock.recv(4096)
+            data = client_sock.recv(1024)
             if data:
                 self.handle_received_data(data)
+        except Exception as e:
+            print(f"Error manejando datos del cliente: {e}")
         finally:
             client_sock.close()
 
     def handle_received_data(self, data):
-        """Procesa datos recibidos como JSON y aplica cambios en la carpeta."""
-        changes = json.loads(data.decode())
-        with self.lock:
-            for change in changes:
-                action = change["action"]
-                file_name = change["file_name"]
+        try:
+            if data.startswith(b"DELETE::"):
+                file_name = data.decode().split("::", 1)[1]
                 file_path = os.path.join(self.folder_path, file_name)
-
-                if action == "added" or action == "modified":
-                    # Escribir o actualizar el archivo
-                    with open(file_path, 'wb') as f:
-                        f.write(change["file_data"].encode())
-                    print(f"Archivo {'creado' if action == 'added' else 'modificado'}: {file_name}")
-                elif action == "deleted":
-                    # Eliminar el archivo local si existe
+                with self.lock:
                     if os.path.exists(file_path):
                         os.remove(file_path)
                         print(f"Archivo eliminado: {file_name}")
+            else:
+                file_name, file_data = data.decode().split("::", 1)
+                file_path = os.path.join(self.folder_path, file_name)
 
-    def send_changes(self, changes, peer_addr):
-        """Envía cambios detectados al otro dispositivo."""
-        with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM) as sock:
-            try:
+                with self.lock:
+                    with open(file_path, 'wb') as f:
+                        f.write(file_data.encode())
+                print(f"Archivo recibido: {file_name}")
+        except Exception as e:
+            print(f"Error al procesar los datos recibidos: {e}")
+
+    def send_file(self, file_path, peer_addr):
+        try:
+            with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM) as sock:
                 sock.connect((peer_addr, self.port))
-                sock.sendall(json.dumps(changes).encode())
-                print(f"Cambios enviados: {changes}")
-            except Exception as e:
-                print(f"Error al enviar cambios: {e}")
+                file_name = os.path.basename(file_path)
+                with open(file_path, 'rb') as f:
+                    file_data = f.read()
+                sock.sendall(f"{file_name}::{file_data.decode()}".encode())
+                print(f"Archivo enviado: {file_name}")
+        except FileNotFoundError:
+            print(f"Archivo no encontrado: {file_path}")
+        except ConnectionError as e:
+            print(f"Error de conexión al enviar archivo: {e}")
+        except Exception as e:
+            print(f"Error desconocido al enviar archivo: {e}")
