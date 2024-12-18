@@ -1,7 +1,7 @@
 import socket
 import os
 import threading
-
+import json
 
 class BluetoothServer:
     def __init__(self, local_addr, folder_path, port=30):
@@ -26,29 +26,38 @@ class BluetoothServer:
 
     def handle_client(self, client_sock):
         try:
-            data = client_sock.recv(1024)
+            data = client_sock.recv(4096)
             if data:
                 self.handle_received_data(data)
         finally:
             client_sock.close()
 
     def handle_received_data(self, data):
-        file_name, file_data = data.decode().split('::', 1)
-        file_path = os.path.join(self.folder_path, file_name)
-
+        """Procesa datos recibidos como JSON y aplica cambios en la carpeta."""
+        changes = json.loads(data.decode())
         with self.lock:
-            with open(file_path, 'wb') as f:
-                f.write(file_data.encode())
-        print(f"Archivo recibido: {file_name}")
+            for change in changes:
+                action = change["action"]
+                file_name = change["file_name"]
+                file_path = os.path.join(self.folder_path, file_name)
 
-    def send_file(self, file_path, peer_addr):
+                if action == "added" or action == "modified":
+                    # Escribir o actualizar el archivo
+                    with open(file_path, 'wb') as f:
+                        f.write(change["file_data"].encode())
+                    print(f"Archivo {'creado' if action == 'added' else 'modificado'}: {file_name}")
+                elif action == "deleted":
+                    # Eliminar el archivo local si existe
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        print(f"Archivo eliminado: {file_name}")
+
+    def send_changes(self, changes, peer_addr):
+        """Envía cambios detectados al otro dispositivo."""
         with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM) as sock:
             try:
                 sock.connect((peer_addr, self.port))
-                file_name = os.path.basename(file_path)
-                with open(file_path, 'rb') as f:
-                    file_data = f.read()
-                sock.sendall(f"{file_name}::{file_data.decode()}".encode())
-                print(f"Archivo enviado: {file_name}")
+                sock.sendall(json.dumps(changes).encode())
+                print(f"Cambios enviados: {changes}")
             except Exception as e:
-                print(f"Error al enviar el archivo: {e}")
+                print(f"Error al enviar cambios: {e}")

@@ -1,18 +1,18 @@
 import os
 import time
+import json
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-import threading
-
 
 class FolderSync:
-    def __init__(self, folder_path, server):
+    def __init__(self, folder_path, server, peer_addr):
         self.folder_path = folder_path
         self.server = server
+        self.peer_addr = peer_addr
 
     def start_sync(self):
         # Configura un observador para la carpeta
-        event_handler = FolderEventHandler(self.server)
+        event_handler = FolderEventHandler(self.folder_path, self.server, self.peer_addr)
         observer = Observer()
         observer.schedule(event_handler, self.folder_path, recursive=True)
         observer.start()
@@ -27,20 +27,40 @@ class FolderSync:
 
 
 class FolderEventHandler(FileSystemEventHandler):
-    def __init__(self, server):
+    def __init__(self, folder_path, server, peer_addr):
+        self.folder_path = folder_path
         self.server = server
-        self.synced_files = set()  # Para evitar duplicados
+        self.peer_addr = peer_addr
 
     def on_created(self, event):
         if not event.is_directory:
-            self.sync_file(event.src_path)
+            self.sync_file(event.src_path, "added")
 
     def on_modified(self, event):
         if not event.is_directory:
-            self.sync_file(event.src_path)
+            self.sync_file(event.src_path, "modified")
 
-    def sync_file(self, file_path):
-        if file_path not in self.synced_files:
-            self.synced_files.add(file_path)
-            peer_addr = input("Enter the Bluetooth address of the peer: ")
-            self.server.send_file(file_path, peer_addr)
+    def on_deleted(self, event):
+        if not event.is_directory:
+            self.sync_file(event.src_path, "deleted")
+
+    def sync_file(self, file_path, action):
+        """Envía información del cambio al servidor."""
+        file_name = os.path.relpath(file_path, self.folder_path)
+        changes = []
+
+        if action in ["added", "modified"]:
+            with open(file_path, 'rb') as f:
+                file_data = f.read().decode()
+            changes.append({
+                "action": action,
+                "file_name": file_name,
+                "file_data": file_data,
+            })
+        elif action == "deleted":
+            changes.append({
+                "action": action,
+                "file_name": file_name,
+            })
+
+        self.server.send_changes(changes, self.peer_addr)
